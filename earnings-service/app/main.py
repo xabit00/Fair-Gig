@@ -48,8 +48,10 @@ class VerificationUpdate(BaseModel):
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     pool.open()
-    yield
-    pool.close()
+    try:
+        yield
+    finally:
+        pool.close()
 
 
 app = FastAPI(title="FairGig Earnings Service", version="1.0.0", lifespan=lifespan)

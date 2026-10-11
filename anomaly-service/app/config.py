@@ -13,7 +13,7 @@ load_dotenv(SERVICE_DIR.parent / ".env")
 @dataclass(frozen=True)
 class Settings:
     database_url: str = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/fairgig")
-    jwt_secret: str = os.getenv("JWT_SECRET", "change-this-development-secret-now")
+    jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "supersecretkey")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     cors_origins: tuple[str, ...] = tuple(
         origin.strip()

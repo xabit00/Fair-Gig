@@ -1,6 +1,9 @@
-from collections.abc import Generator
+
+from contextlib import contextmanager
+from typing import Generator
 
 from psycopg import Connection
+from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from .config import settings
@@ -12,10 +15,12 @@ pool = ConnectionPool(
     max_size=3,
     timeout=10,
     check=ConnectionPool.check_connection,
+    kwargs={"row_factory": dict_row},
     open=False,
 )
 
 
+@contextmanager
 def get_connection() -> Generator[Connection, None, None]:
     with pool.connection() as connection:
         yield connection
