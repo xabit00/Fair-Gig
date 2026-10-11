@@ -5,14 +5,13 @@ from __future__ import annotations
 import os
 import random
 import uuid
-from datetime import date, datetime, time, timedelta, timezone
-from decimal import Decimal, ROUND_HALF_UP
+from datetime import UTC, date, datetime, time, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import bcrypt
 import psycopg
 from dotenv import load_dotenv
-
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
@@ -78,7 +77,7 @@ def money(value: float) -> Decimal:
 
 
 def utc_at(day: date, hour: int = 12) -> datetime:
-    return datetime.combine(day, time(hour=hour), tzinfo=timezone.utc)
+    return datetime.combine(day, time(hour=hour), tzinfo=UTC)
 
 
 def build_workers(password_hash: str) -> list[tuple]:

@@ -4,7 +4,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
 
-
 Role = Literal["worker", "verifier", "advocate"]
 Category = Literal["ride_hailing", "delivery", "freelancing"]
 

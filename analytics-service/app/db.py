@@ -6,7 +6,6 @@ from psycopg_pool import ConnectionPool
 
 from .config import settings
 
-
 pool = ConnectionPool(
     conninfo=settings.database_url,
     min_size=1,

@@ -1,13 +1,12 @@
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 import hashlib
 import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
 
 from .config import settings
-
 
 ISSUER = "fairgig-auth"
 AUDIENCE = "fairgig-services"
@@ -37,7 +36,7 @@ def hash_token(token: str) -> str:
 
 
 def create_token_pair(user_id: uuid.UUID, role: str) -> TokenPair:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     access_expires = now + timedelta(minutes=settings.access_token_minutes)
     refresh_expires = now + timedelta(days=settings.refresh_token_days)
     refresh_id = uuid.uuid4()

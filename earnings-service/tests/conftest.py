@@ -1,10 +1,9 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.auth import verify_token
 from app.main import app
+from fastapi.testclient import TestClient
 
 MOCK_WORKER = {
     "sub": "test_worker_uuid_123",

@@ -18,7 +18,13 @@ from .models import (
     RoleUpdateRequest,
     UserResponse,
 )
-from .security import create_token_pair, decode_token, hash_password, hash_token, verify_password
+from .security import (
+    create_token_pair,
+    decode_token,
+    hash_password,
+    hash_token,
+    verify_password,
+)
 
 
 @asynccontextmanager

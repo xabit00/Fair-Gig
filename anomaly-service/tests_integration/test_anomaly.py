@@ -8,7 +8,8 @@ The test database should have the FairGig schema applied (see db/schema.sql).
 Run with: pytest tests_integration/ -v
 """
 
-from datetime import date
+from datetime import UTC, date
+
 from fastapi.testclient import TestClient
 
 
@@ -241,7 +242,7 @@ def test_missing_jwt_rejected(client: TestClient):
 def test_invalid_jwt_signature_rejected(client: TestClient):
     """Request with invalid JWT signature should be rejected."""
     import jwt
-    from app.auth import SECRET_KEY, ALGORITHM
+    from app.auth import ALGORITHM
     wrong_token = jwt.encode({"sub": "test", "role": "worker"}, "wrong-secret", algorithm=ALGORITHM)
     headers = {"Authorization": f"Bearer {wrong_token}"}
     response = client.get("/detect/me", headers=headers)
@@ -250,11 +251,12 @@ def test_invalid_jwt_signature_rejected(client: TestClient):
 
 def test_expired_jwt_rejected(client: TestClient):
     """Request with expired JWT should be rejected."""
-    import jwt
     from datetime import datetime, timedelta
-    from app.auth import SECRET_KEY, ALGORITHM
+
+    import jwt
+    from app.auth import ALGORITHM, SECRET_KEY
     expired_token = jwt.encode(
-        {"sub": "test", "role": "worker", "exp": datetime.utcnow() - timedelta(hours=1)},
+        {"sub": "test", "role": "worker", "exp": datetime.now(UTC) - timedelta(hours=1)},
         SECRET_KEY, algorithm=ALGORITHM
     )
     headers = {"Authorization": f"Bearer {expired_token}"}

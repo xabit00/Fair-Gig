@@ -22,7 +22,7 @@ def test_detect_me_worker_own_data(worker_auth, mock_db, client):
 
 def test_detect_me_empty_history(worker_auth, mock_db, client):
     """Worker with no earnings gets empty result."""
-    mock_cursor, state = mock_db
+    _mock_cursor, state = mock_db
     state["earnings"] = []
     response = client.get("/detect/me")
     assert response.status_code == 200
@@ -62,7 +62,7 @@ def test_detect_worker_advocate_can_analyze(advocate_auth, mock_db, client):
 
 def test_detect_worker_nonexistent_returns_404(verifier_auth, mock_db, client):
     """Analyzing non-existent worker returns 404."""
-    mock_cursor, state = mock_db
+    _mock_cursor, state = mock_db
     state["worker_exists"] = False
     
     response = client.post("/detect", json={"worker_id": "550e8400-e29b-41d4-a716-446655440099", "earnings": []})

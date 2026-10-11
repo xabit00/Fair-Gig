@@ -8,7 +8,8 @@ The test database should have the FairGig schema applied (see db/schema.sql).
 Run with: pytest tests_integration/ -v
 """
 
-from datetime import date, time
+from datetime import UTC
+
 from fastapi.testclient import TestClient
 
 
@@ -235,11 +236,12 @@ def test_update_shift_unauthorized_worker(client: TestClient, auth_headers: dict
     shift_id = create_resp.json()["shift_id"]
 
     # Try to update as worker B (using verifier token which has different sub)
-    import jwt
     from datetime import datetime, timedelta
-    from app.auth import SECRET_KEY, ALGORITHM
+
+    import jwt
+    from app.auth import ALGORITHM, SECRET_KEY
     worker_b_token = jwt.encode(
-        {"sub": test_verifier, "role": "worker", "exp": datetime.utcnow() + timedelta(hours=1)},
+        {"sub": test_verifier, "role": "worker", "exp": datetime.now(UTC) + timedelta(hours=1)},
         SECRET_KEY, algorithm=ALGORITHM
     )
     worker_b_headers = {"Authorization": f"Bearer {worker_b_token}"}
@@ -290,11 +292,12 @@ def test_delete_shift_unauthorized_worker(client: TestClient, auth_headers: dict
     shift_id = create_resp.json()["shift_id"]
 
     # Try to delete as different worker
-    import jwt
     from datetime import datetime, timedelta
-    from app.auth import SECRET_KEY, ALGORITHM
+
+    import jwt
+    from app.auth import ALGORITHM, SECRET_KEY
     worker_b_token = jwt.encode(
-        {"sub": test_verifier, "role": "worker", "exp": datetime.utcnow() + timedelta(hours=1)},
+        {"sub": test_verifier, "role": "worker", "exp": datetime.now(UTC) + timedelta(hours=1)},
         SECRET_KEY, algorithm=ALGORITHM
     )
     worker_b_headers = {"Authorization": f"Bearer {worker_b_token}"}
@@ -355,7 +358,7 @@ def test_missing_jwt_rejected(client: TestClient):
 def test_invalid_jwt_signature_rejected(client: TestClient):
     """Request with invalid JWT signature should be rejected."""
     import jwt
-    from app.auth import SECRET_KEY, ALGORITHM
+    from app.auth import ALGORITHM
     # Create token with wrong secret
     wrong_token = jwt.encode({"sub": "test", "role": "worker"}, "wrong-secret", algorithm=ALGORITHM)
     headers = {"Authorization": f"Bearer {wrong_token}"}
@@ -365,11 +368,12 @@ def test_invalid_jwt_signature_rejected(client: TestClient):
 
 def test_expired_jwt_rejected(client: TestClient):
     """Request with expired JWT should be rejected."""
-    import jwt
     from datetime import datetime, timedelta
-    from app.auth import SECRET_KEY, ALGORITHM
+
+    import jwt
+    from app.auth import ALGORITHM, SECRET_KEY
     expired_token = jwt.encode(
-        {"sub": "test", "role": "worker", "exp": datetime.utcnow() - timedelta(hours=1)},
+        {"sub": "test", "role": "worker", "exp": datetime.now(UTC) - timedelta(hours=1)},
         SECRET_KEY, algorithm=ALGORITHM
     )
     headers = {"Authorization": f"Bearer {expired_token}"}

@@ -8,7 +8,6 @@ from psycopg import Connection
 from .db import get_connection
 from .security import decode_token
 
-
 bearer = HTTPBearer(auto_error=False)
 
 

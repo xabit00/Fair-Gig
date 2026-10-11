@@ -9,17 +9,15 @@ Run with: pytest tests_integration/ -v
 """
 
 import os
-import pytest
-from fastapi.testclient import TestClient
+from datetime import UTC, datetime, timedelta
+
 import jwt
-from datetime import datetime, timedelta
-from contextlib import contextmanager
+import pytest
+from app.auth import ALGORITHM
+from app.main import app
+from fastapi.testclient import TestClient
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
-
-from app.main import app
-from app.auth import SECRET_KEY, ALGORITHM
-
 
 TEST_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/fairgig_test")
 TEST_JWT_SECRET = os.getenv("JWT_SECRET_KEY", "test-secret-key-for-integration-tests-only")
@@ -30,7 +28,7 @@ def create_test_token(user_id: str, role: str = "worker") -> str:
     payload = {
         "sub": user_id,
         "role": role,
-        "exp": datetime.utcnow() + timedelta(hours=1),
+        "exp": datetime.now(UTC) + timedelta(hours=1),
     }
     return jwt.encode(payload, TEST_JWT_SECRET, algorithm=ALGORITHM)
 
