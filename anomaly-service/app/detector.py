@@ -1,5 +1,13 @@
 from collections import defaultdict
 from statistics import mean, pstdev
+from datetime import date
+
+
+def _to_date(d):
+    """Convert string or date to date object."""
+    if isinstance(d, str):
+        return date.fromisoformat(d)
+    return d
 
 
 def detect_anomalies(records: list[dict]) -> list[dict]:
@@ -19,7 +27,7 @@ def detect_anomalies(records: list[dict]) -> list[dict]:
                 anomalies.append(
                     {
                         "type": "high_deduction",
-                        "date": record["date"].isoformat(),
+                        "date": _to_date(record["date"]).isoformat(),
                         "platform": record["platform"],
                         "value": round(deduction, 2),
                         "threshold": round(deduction_threshold, 2),
@@ -32,7 +40,8 @@ def detect_anomalies(records: list[dict]) -> list[dict]:
 
     monthly_income: dict[str, float] = defaultdict(float)
     for record in records:
-        monthly_income[record["date"].strftime("%Y-%m")] += float(record["net_received"])
+        d = _to_date(record["date"])
+        monthly_income[d.strftime("%Y-%m")] += float(record["net_received"])
 
     ordered_months = sorted(monthly_income)
     for previous_month, current_month in zip(ordered_months, ordered_months[1:]):

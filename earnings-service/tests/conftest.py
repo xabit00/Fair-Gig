@@ -21,7 +21,7 @@ def mock_db():
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         
-        # Default shift return value
+        # Default shift return value - this will be mutated
         valid_shift = {
             "shift_id": "11111111-2222-3333-4444-555555555555",
             "worker_id": "test_worker_uuid_123",
@@ -46,11 +46,10 @@ def mock_db():
             "total_shifts": 1
         }
         
-        # Track call state for dynamic responses
-        call_state = {"call_count": 0}
+        # Track state for dynamic responses
+        state = {"current_shift": valid_shift.copy(), "unauthorized_test": False}
         
         def execute_side_effect(query, params=None):
-            call_state["call_count"] += 1
             q = query.strip().upper()
             
             if "SUM(HOURS_WORKED)" in q:
@@ -60,16 +59,38 @@ def mock_db():
             elif "DELETE FROM SHIFTS WHERE SHIFT_ID = %S" in q and params and params[0] == "00000000-0000-0000-0000-000000000000":
                 mock_cursor.fetchone.return_value = None
             elif "INSERT INTO SHIFTS" in q:
-                mock_cursor.fetchone.return_value = valid_shift
+                mock_cursor.fetchone.return_value = state["current_shift"]
+            elif "UPDATE SHIFTS" in q:
+                # Parse SET clause to update state
+                if params:
+                    set_clause_start = q.find("SET ")
+                    where_clause_start = q.find(" WHERE ")
+                    if set_clause_start != -1 and where_clause_start != -1:
+                        set_clause = q[set_clause_start + 4:where_clause_start].strip()
+                        columns = [c.split("=")[0].strip().lower() for c in set_clause.split(",")]
+                        values = params[:-2] if len(params) > 2 else params
+                        for col, val in zip(columns, values):
+                            if col in state["current_shift"]:
+                                state["current_shift"][col] = val
+                mock_cursor.fetchone.return_value = state["current_shift"]
+            elif "SELECT * FROM SHIFTS WHERE SHIFT_ID = %S" in q:
+                # Check if this is an unauthorized test - return None if flag set
+                if state.get("unauthorized_test") and params and params[0] == "11111111-2222-3333-4444-555555555555":
+                    mock_cursor.fetchone.return_value = None
+                else:
+                    mock_cursor.fetchone.return_value = state["current_shift"]
             else:
-                mock_cursor.fetchone.return_value = valid_shift
+                mock_cursor.fetchone.return_value = state["current_shift"]
+            
+            # For fetchall (list shifts)
+            if "SELECT * FROM SHIFTS WHERE WORKER_ID" in q:
+                mock_cursor.fetchall.return_value = [state["current_shift"]]
 
         mock_cursor.execute.side_effect = execute_side_effect
-        mock_cursor.fetchall.return_value = [valid_shift]
         
         mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
         mock_get_conn.return_value.__enter__.return_value = mock_conn
-        yield mock_cursor
+        yield mock_cursor, state
 
 @pytest.fixture
 def client():

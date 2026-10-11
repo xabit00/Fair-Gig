@@ -24,12 +24,33 @@ class ShiftUpdate(BaseModel):
     work_date: Optional[date] = None
     start_time: Optional[time] = None
     end_time: Optional[time] = None
-    hours_worked: Optional[float] = Field(None, gt=0)
-    gross_earned: Optional[float] = Field(None, ge=0)
-    deductions: Optional[float] = Field(None, ge=0)
-    commission: Optional[float] = Field(None, ge=0)
-    net_received: Optional[float] = Field(None, ge=0)
+    hours_worked: Optional[float] = None
+    gross_earned: Optional[float] = None
+    deductions: Optional[float] = None
+    commission: Optional[float] = None
+    net_received: Optional[float] = None
     status: Optional[str] = None
+
+def _validate_shift_state(
+    hours_worked: float,
+    gross_earned: float,
+    deductions: float,
+    commission: float,
+    net_received: float
+) -> None:
+    """Validate complete shift financial state."""
+    if hours_worked <= 0:
+        raise HTTPException(status_code=400, detail="Hours worked must be greater than 0.")
+    if gross_earned < 0:
+        raise HTTPException(status_code=400, detail="Gross earned cannot be negative.")
+    if deductions < 0:
+        raise HTTPException(status_code=400, detail="Deductions cannot be negative.")
+    if commission < 0:
+        raise HTTPException(status_code=400, detail="Commission cannot be negative.")
+    if net_received < 0:
+        raise HTTPException(status_code=400, detail="Net received cannot be negative.")
+    if net_received > gross_earned:
+        raise HTTPException(status_code=400, detail="Net received cannot exceed gross earned.")
 
 @app.get("/health")
 def health_check():
@@ -44,8 +65,10 @@ def health_check():
 def create_shift(shift: ShiftCreate, token_data: dict = Depends(verify_token)):
     worker_id = token_data["sub"]
     
-    if shift.net_received > shift.gross_earned:
-        raise HTTPException(status_code=400, detail="Net received cannot exceed gross earned.")
+    _validate_shift_state(
+        shift.hours_worked, shift.gross_earned, shift.deductions,
+        shift.commission, shift.net_received
+    )
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -117,9 +140,19 @@ def update_shift(shift_id: str, shift: ShiftUpdate, token_data: dict = Depends(v
             if not existing:
                 raise HTTPException(status_code=404, detail="Shift not found or unauthorized")
 
-            update_data = shift.dict(exclude_unset=True)
+            update_data = shift.model_dump(exclude_unset=True)
             if not update_data:
                 return existing
+
+            # Build final state by merging existing with updates
+            final_hours = update_data.get("hours_worked", existing["hours_worked"])
+            final_gross = update_data.get("gross_earned", existing["gross_earned"])
+            final_deductions = update_data.get("deductions", existing["deductions"])
+            final_commission = update_data.get("commission", existing["commission"])
+            final_net = update_data.get("net_received", existing["net_received"])
+
+            # Validate complete final state
+            _validate_shift_state(final_hours, final_gross, final_deductions, final_commission, final_net)
 
             set_clauses = []
             params = []
