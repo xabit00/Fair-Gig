@@ -1,8 +1,9 @@
-import pytest
-from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, patch
+
+import pytest
+from app.auth import require_roles, verify_token
 from app.main import app
-from app.auth import verify_token, require_roles
+from fastapi.testclient import TestClient
 
 MOCK_WORKER = {
     "sub": "test_worker_uuid_123",

@@ -17,17 +17,20 @@ CREATE TABLE IF NOT EXISTS shifts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     worker_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     platform VARCHAR(80) NOT NULL,
-    date DATE NOT NULL,
+    work_date DATE NOT NULL,
+    start_time TIME,
+    end_time TIME,
     hours_worked NUMERIC(5, 2) NOT NULL CHECK (hours_worked > 0 AND hours_worked <= 24),
     gross_earned NUMERIC(12, 2) NOT NULL CHECK (gross_earned >= 0),
     deductions NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (deductions >= 0),
+    commission NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (commission >= 0),
     net_received NUMERIC(12, 2) NOT NULL CHECK (net_received >= 0),
-    verification_status VARCHAR(30) NOT NULL DEFAULT 'pending'
-        CHECK (verification_status IN ('pending', 'confirmed', 'discrepancy_flagged', 'unverifiable')),
+    status VARCHAR(30) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'confirmed', 'discrepancy_flagged', 'unverifiable')),
     screenshot_url TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (net_received <= gross_earned),
-    UNIQUE (worker_id, platform, date)
+    UNIQUE (worker_id, platform, work_date)
 );
 
 CREATE TABLE IF NOT EXISTS grievance_clusters (
@@ -68,8 +71,8 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_shifts_worker_date ON shifts (worker_id, date DESC);
-CREATE INDEX IF NOT EXISTS idx_shifts_platform_date ON shifts (platform, date DESC);
+CREATE INDEX IF NOT EXISTS idx_shifts_worker_date ON shifts (worker_id, work_date DESC);
+CREATE INDEX IF NOT EXISTS idx_shifts_platform_date ON shifts (platform, work_date DESC);
 CREATE INDEX IF NOT EXISTS idx_grievances_worker ON grievances (worker_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_grievances_cluster ON grievances (cluster_id);
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens (user_id);

@@ -1,10 +1,9 @@
 from contextlib import contextmanager
-from psycopg import Connection
+
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from .config import settings
-
 
 pool = ConnectionPool(
     conninfo=settings.database_url,

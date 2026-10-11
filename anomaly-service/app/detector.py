@@ -1,6 +1,6 @@
 from collections import defaultdict
-from statistics import mean, pstdev
 from datetime import date
+from statistics import mean, pstdev
 
 
 def _to_date(d):

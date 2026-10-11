@@ -1,7 +1,4 @@
-import pytest
-from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
-from datetime import date
+from unittest.mock import patch
 
 
 def test_detect_me_requires_auth(worker_auth, client):
@@ -25,7 +22,7 @@ def test_detect_me_worker_own_data(worker_auth, mock_db, client):
 
 def test_detect_me_empty_history(worker_auth, mock_db, client):
     """Worker with no earnings gets empty result."""
-    mock_cursor, state = mock_db
+    _mock_cursor, state = mock_db
     state["earnings"] = []
     response = client.get("/detect/me")
     assert response.status_code == 200
@@ -65,7 +62,7 @@ def test_detect_worker_advocate_can_analyze(advocate_auth, mock_db, client):
 
 def test_detect_worker_nonexistent_returns_404(verifier_auth, mock_db, client):
     """Analyzing non-existent worker returns 404."""
-    mock_cursor, state = mock_db
+    _mock_cursor, state = mock_db
     state["worker_exists"] = False
     
     response = client.post("/detect", json={"worker_id": "550e8400-e29b-41d4-a716-446655440099", "earnings": []})
@@ -112,9 +109,22 @@ def test_rules_endpoint_accessible(worker_auth, mock_db, client):
 
 
 def test_health_endpoint(worker_auth, mock_db, client):
-    """Health endpoint works."""
+    """Health endpoint works with database connectivity check."""
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
     assert data["service"] == "anomaly-service"
-    assert data["status"] == "ok"
+    assert data["status"] == "healthy"
+    assert data["database"] == "connected"
+
+
+def test_health_endpoint_database_failure(worker_auth, client):
+    """Health endpoint returns unhealthy when database is unavailable."""
+    with patch("app.main.get_connection") as mock_get_conn:
+        mock_get_conn.side_effect = Exception("Connection refused")
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["service"] == "anomaly-service"
+        assert data["status"] == "unhealthy"
+        assert data["database"] == "disconnected"

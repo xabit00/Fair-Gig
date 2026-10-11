@@ -1,8 +1,9 @@
-import pytest
-from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, patch
-from app.main import app
+
+import pytest
 from app.auth import verify_token
+from app.main import app
+from fastapi.testclient import TestClient
 
 MOCK_WORKER = {
     "sub": "test_worker_uuid_123",
@@ -54,9 +55,7 @@ def mock_db():
             
             if "SUM(HOURS_WORKED)" in q:
                 mock_cursor.fetchone.return_value = summary_data
-            elif "SELECT * FROM SHIFTS WHERE SHIFT_ID = %S" in q and params and params[0] == "00000000-0000-0000-0000-000000000000":
-                mock_cursor.fetchone.return_value = None
-            elif "DELETE FROM SHIFTS WHERE SHIFT_ID = %S" in q and params and params[0] == "00000000-0000-0000-0000-000000000000":
+            elif "SELECT * FROM SHIFTS WHERE SHIFT_ID = %S" in q and params and params[0] == "00000000-0000-0000-0000-000000000000" or "DELETE FROM SHIFTS WHERE SHIFT_ID = %S" in q and params and params[0] == "00000000-0000-0000-0000-000000000000":
                 mock_cursor.fetchone.return_value = None
             elif "INSERT INTO SHIFTS" in q:
                 mock_cursor.fetchone.return_value = state["current_shift"]

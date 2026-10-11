@@ -139,7 +139,7 @@ def test_update_negative_gross_earned(client):
 def test_update_shift_unauthorized_worker(mock_db, client):
     """Worker A cannot update Worker B's shift."""
     # mock_db is a tuple (mock_cursor, state)
-    mock_cursor, state = mock_db
+    _mock_cursor, state = mock_db
     # Enable unauthorized test mode - returns None for the valid shift_id
     state["unauthorized_test"] = True
     
