@@ -1,17 +1,18 @@
-from fastapi import FastAPI, Depends, HTTPException, status
-from pydantic import BaseModel, Field
-from typing import Optional
 from datetime import date, time
-from .db import get_connection
+
+from fastapi import Depends, FastAPI, HTTPException, status
+from pydantic import BaseModel, Field
+
 from .auth import verify_token
+from .db import get_connection
 
 app = FastAPI(title="FairGig Earnings Service", version="1.0.0")
 
 class ShiftCreate(BaseModel):
     platform: str
     work_date: date
-    start_time: Optional[time] = None
-    end_time: Optional[time] = None
+    start_time: time | None = None
+    end_time: time | None = None
     hours_worked: float = Field(..., gt=0)
     gross_earned: float = Field(..., ge=0)
     deductions: float = Field(..., ge=0)
@@ -20,16 +21,16 @@ class ShiftCreate(BaseModel):
     status: str = "pending"
 
 class ShiftUpdate(BaseModel):
-    platform: Optional[str] = None
-    work_date: Optional[date] = None
-    start_time: Optional[time] = None
-    end_time: Optional[time] = None
-    hours_worked: Optional[float] = None
-    gross_earned: Optional[float] = None
-    deductions: Optional[float] = None
-    commission: Optional[float] = None
-    net_received: Optional[float] = None
-    status: Optional[str] = None
+    platform: str | None = None
+    work_date: date | None = None
+    start_time: time | None = None
+    end_time: time | None = None
+    hours_worked: float | None = None
+    gross_earned: float | None = None
+    deductions: float | None = None
+    commission: float | None = None
+    net_received: float | None = None
+    status: str | None = None
 
 def _validate_shift_state(
     hours_worked: float,
@@ -90,31 +91,30 @@ def create_shift(shift: ShiftCreate, token_data: dict = Depends(verify_token)):
 
 @app.get("/shifts")
 def list_shifts(
-    platform: Optional[str] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
+    platform: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
     token_data: dict = Depends(verify_token)
 ):
     worker_id = token_data["sub"]
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            query = "SELECT * FROM shifts WHERE worker_id = %s"
-            params = [worker_id]
+    with get_connection() as conn, conn.cursor() as cur:
+        query = "SELECT * FROM shifts WHERE worker_id = %s"
+        params = [worker_id]
 
-            if platform:
-                query += " AND platform = %s"
-                params.append(platform)
-            if start_date:
-                query += " AND work_date >= %s"
-                params.append(start_date)
-            if end_date:
-                query += " AND work_date <= %s"
-                params.append(end_date)
+        if platform:
+            query += " AND platform = %s"
+            params.append(platform)
+        if start_date:
+            query += " AND work_date >= %s"
+            params.append(start_date)
+        if end_date:
+            query += " AND work_date <= %s"
+            params.append(end_date)
 
-            query += " ORDER BY work_date DESC"
-            cur.execute(query, params)
-            shifts = cur.fetchall()
-            return {"shifts": shifts, "count": len(shifts)}
+        query += " ORDER BY work_date DESC"
+        cur.execute(query, params)
+        shifts = cur.fetchall()
+        return {"shifts": shifts, "count": len(shifts)}
 
 @app.get("/shifts/{shift_id}")
 def get_shift(shift_id: str, token_data: dict = Depends(verify_token)):
@@ -182,10 +182,9 @@ def delete_shift(shift_id: str, token_data: dict = Depends(verify_token)):
 @app.get("/earnings/summary")
 def earnings_summary(token_data: dict = Depends(verify_token)):
     worker_id = token_data["sub"]
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 SELECT 
                     COALESCE(SUM(hours_worked), 0) as total_hours,
                     COALESCE(SUM(gross_earned), 0) as total_gross,
@@ -196,15 +195,15 @@ def earnings_summary(token_data: dict = Depends(verify_token)):
                 FROM shifts 
                 WHERE worker_id = %s
                 """,
-                (worker_id,)
-            )
-            summary = cur.fetchone()
-            total_net = summary["total_net"]
-            total_hours = summary["total_hours"]
-            effective_hourly_rate = (total_net / total_hours) if total_hours > 0 else 0.0
-            
-            return {
-                **summary,
-                "effective_hourly_rate": round(effective_hourly_rate, 2)
-            }
+            (worker_id,)
+        )
+        summary = cur.fetchone()
+        total_net = summary["total_net"]
+        total_hours = summary["total_hours"]
+        effective_hourly_rate = (total_net / total_hours) if total_hours > 0 else 0.0
+
+        return {
+            **summary,
+            "effective_hourly_rate": round(effective_hourly_rate, 2)
+        }
 

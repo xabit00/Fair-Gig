@@ -3,8 +3,8 @@ from datetime import date
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Query
-from pydantic import BaseModel, Field
 from psycopg import Connection
+from pydantic import BaseModel, Field
 
 from .auth import require_roles, verify_token
 from .db import get_connection, pool
@@ -49,7 +49,12 @@ app = FastAPI(
 
 @app.get("/health")
 def health() -> dict:
-    return {"service": "anomaly-service", "status": "ok", "database": "connected"}
+    try:
+        with get_connection() as conn:
+            conn.execute("SELECT 1")
+        return {"service": "anomaly-service", "status": "healthy", "database": "connected"}
+    except Exception:
+        return {"service": "anomaly-service", "status": "unhealthy", "database": "disconnected"}
 
 
 @app.get("/rules")

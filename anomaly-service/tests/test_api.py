@@ -1,7 +1,4 @@
-import pytest
-from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
-from datetime import date
+from unittest.mock import patch
 
 
 def test_detect_me_requires_auth(worker_auth, client):
@@ -112,9 +109,22 @@ def test_rules_endpoint_accessible(worker_auth, mock_db, client):
 
 
 def test_health_endpoint(worker_auth, mock_db, client):
-    """Health endpoint works."""
+    """Health endpoint works with database connectivity check."""
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
     assert data["service"] == "anomaly-service"
-    assert data["status"] == "ok"
+    assert data["status"] == "healthy"
+    assert data["database"] == "connected"
+
+
+def test_health_endpoint_database_failure(worker_auth, client):
+    """Health endpoint returns unhealthy when database is unavailable."""
+    with patch("app.main.get_connection") as mock_get_conn:
+        mock_get_conn.side_effect = Exception("Connection refused")
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["service"] == "anomaly-service"
+        assert data["status"] == "unhealthy"
+        assert data["database"] == "disconnected"
