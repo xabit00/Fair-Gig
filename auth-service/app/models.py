@@ -18,7 +18,7 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=1, max_length=72)
 
 
@@ -33,7 +33,7 @@ class RoleUpdateRequest(BaseModel):
 class UserResponse(BaseModel):
     id: UUID
     name: str
-    email: EmailStr
+    email: str
     role: Role
     city_zone: str | None
     category: Category | None
@@ -46,4 +46,3 @@ class AuthResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     user: UserResponse
-

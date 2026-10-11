@@ -24,7 +24,7 @@ fairgig/
 
 - Python 3.11 or newer, available as `py`
 - Node.js 20.19 or newer with npm
-- PostgreSQL 15 or newer with `createdb` and `psql` on `PATH`
+- Access to the existing FairGig Neon PostgreSQL project
 
 ## First-time setup in PowerShell
 
@@ -32,12 +32,7 @@ Run these commands from the repository root:
 
 ```powershell
 Copy-Item .env.example .env
-createdb -U postgres fairgig
-psql -U postgres -d fairgig -f db/schema.sql
-
-py -m venv db/.venv
-db/.venv/Scripts/python -m pip install -r db/requirements.txt
-db/.venv/Scripts/python db/seed.py
+# Edit .env and provide the pooled Neon DATABASE_URL and shared JWT_SECRET.
 
 py -m venv auth-service/.venv
 auth-service/.venv/Scripts/python -m pip install -r auth-service/requirements.txt
@@ -53,7 +48,7 @@ npm install --prefix certificate-service
 npm install --prefix frontend
 ```
 
-If your local PostgreSQL credentials differ, edit `DATABASE_URL` in `.env` before applying the schema or running the seed.
+Use the pooled Neon connection string for normal application traffic. Do not run `db/seed.py` against the shared database during ordinary setup: it truncates and recreates FairGig data.
 
 ## Start each service with one command
 

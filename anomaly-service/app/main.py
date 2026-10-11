@@ -1,12 +1,22 @@
+
 from contextlib import asynccontextmanager
 from datetime import date
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from psycopg import Connection
 
 from .auth import require_roles, verify_token
+from .config import settings
 from .db import get_connection, pool
 from .detector import detect_anomalies
 
@@ -35,8 +45,10 @@ class DetectionResponse(BaseModel):
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     pool.open()
-    yield
-    pool.close()
+    try:
+        yield
+    finally:
+        pool.close()
 
 
 app = FastAPI(
@@ -46,43 +58,82 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(settings.cors_origins),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.get("/health")
-def health() -> dict:
-    return {"service": "anomaly-service", "status": "ok", "database": "connected"}
+def health(response: Response) -> dict:
+    try:
+        with pool.connection() as connection:
+            connection.execute("SELECT 1")
+        return {
+            "service": "anomaly-service",
+            "status": "ok",
+            "database": "connected",
+        }
+    except Exception:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {
+            "service": "anomaly-service",
+            "status": "unhealthy",
+            "database": "unavailable",
+        }
 
 
 @app.get("/rules")
-def rules(_: dict = Depends(require_roles("worker", "verifier", "advocate"))) -> dict:
+def rules(
+    _: dict = Depends(require_roles("worker", "verifier", "advocate"))
+) -> dict:
     return {
         "rules": [
-            {"id": "high_deduction", "condition": "deduction > mean + 2 population standard deviations"},
-            {"id": "monthly_income_drop", "condition": "month-on-month net income drop > 20%"},
+            {
+                "id": "high_deduction",
+                "condition": "deduction > mean + 2 population standard deviations",
+            },
+            {
+                "id": "monthly_income_drop",
+                "condition": "month-on-month net income drop > 20%",
+            },
         ]
     }
 
 
-def _fetch_worker_earnings(worker_id: str, conn: Connection, start_date: date | None = None, end_date: date | None = None) -> list[dict]:
-    """Fetch earning records for a worker from the database."""
+def _fetch_worker_earnings(
+    worker_id: str,
+    conn: Connection,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> list[dict]:
     with conn.cursor() as cur:
         query = """
-            SELECT work_date as date, platform, gross_earned, deductions, net_received
+            SELECT work_date AS date,
+                   platform,
+                   gross_earned,
+                   deductions,
+                   net_received
             FROM shifts
             WHERE worker_id = %s
         """
         params = [worker_id]
-        
+
         if start_date:
             query += " AND work_date >= %s"
             params.append(start_date)
+
         if end_date:
             query += " AND work_date <= %s"
             params.append(end_date)
-            
+
         query += " ORDER BY work_date"
         cur.execute(query, params)
         rows = cur.fetchall()
-        
+
     return [
         {
             "date": row["date"],
@@ -95,18 +146,12 @@ def _fetch_worker_earnings(worker_id: str, conn: Connection, start_date: date | 
     ]
 
 
-@app.get("/detect/me", response_model=DetectionResponse)
-def detect_my_anomalies(
-    token_data: dict = Depends(verify_token),
-    start_date: date | None = Query(None, description="Start date for analysis"),
-    end_date: date | None = Query(None, description="End date for analysis"),
+def _build_detection_response(
+    worker_id: str,
+    records: list[dict],
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> dict:
-    """Analyze anomalies for the authenticated worker's own earnings."""
-    worker_id = token_data["sub"]
-    
-    with get_connection() as conn:
-        records = _fetch_worker_earnings(worker_id, conn, start_date, end_date)
-    
     if not records:
         return {
             "worker_id": worker_id,
@@ -118,21 +163,47 @@ def detect_my_anomalies(
             "anomalies": [],
             "summary": "No earnings records found for the specified period.",
         }
-    
+
     anomalies = detect_anomalies(records)
-    
-    # Determine analysis period
-    dates = [r["date"] for r in records]
-    period_start = min(dates).isoformat()
-    period_end = max(dates).isoformat()
-    
+    dates = [record["date"] for record in records]
+
     return {
         "worker_id": worker_id,
-        "analysis_period": {"start_date": period_start, "end_date": period_end},
+        "analysis_period": {
+            "start_date": min(dates).isoformat(),
+            "end_date": max(dates).isoformat(),
+        },
         "records_analysed": len(records),
         "anomalies": anomalies,
-        "summary": f"Found {len(anomalies)} anomaly(ies) in {len(records)} records.",
+        "summary": (
+            f"Found {len(anomalies)} anomaly(ies) "
+            f"in {len(records)} records."
+        ),
     }
+
+
+@app.get("/detect/me", response_model=DetectionResponse)
+def detect_my_anomalies(
+    token_data: dict = Depends(verify_token),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+) -> dict:
+    if token_data.get("role") != "worker":
+        raise HTTPException(status_code=403, detail="Worker access required")
+
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="Invalid date range")
+
+    worker_id = str(token_data["sub"])
+
+    with get_connection() as conn:
+        records = _fetch_worker_earnings(
+            worker_id, conn, start_date, end_date
+        )
+
+    return _build_detection_response(
+        worker_id, records, start_date, end_date
+    )
 
 
 @app.post("/detect", response_model=DetectionResponse)
@@ -140,39 +211,21 @@ def detect_worker_anomalies(
     payload: DetectionRequest,
     token_data: dict = Depends(require_roles("verifier", "advocate")),
 ) -> dict:
-    """Analyze anomalies for a specific worker (verifier/advocate only)."""
-    # Verify the target worker exists in database
     worker_id = str(payload.worker_id)
-    
+
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM users WHERE id = %s", (worker_id,))
+            cur.execute(
+                "SELECT id FROM users WHERE id = %s",
+                (worker_id,),
+            )
             if not cur.fetchone():
-                raise HTTPException(status_code=404, detail="Worker not found")
-        
-        # Fetch actual earnings from database for integrity
+                raise HTTPException(
+                    status_code=404,
+                    detail="Worker not found",
+                )
+
         records = _fetch_worker_earnings(worker_id, conn)
-    
-    if not records:
-        return {
-            "worker_id": worker_id,
-            "analysis_period": {"start_date": None, "end_date": None},
-            "records_analysed": 0,
-            "anomalies": [],
-            "summary": "No earnings records found for this worker.",
-        }
-    
-    anomalies = detect_anomalies(records)
-    
-    dates = [r["date"] for r in records]
-    period_start = min(dates).isoformat()
-    period_end = max(dates).isoformat()
-    
-    return {
-        "worker_id": worker_id,
-        "analysis_period": {"start_date": period_start, "end_date": period_end},
-        "records_analysed": len(records),
-        "anomalies": anomalies,
-        "summary": f"Found {len(anomalies)} anomaly(ies) in {len(records)} records.",
-    }
+
+    return _build_detection_response(worker_id, records)
 

@@ -26,4 +26,3 @@ def require_advocate(credentials: HTTPAuthorizationCredentials | None = Depends(
     if payload.get("role") != "advocate":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Advocate role required")
     return payload
-

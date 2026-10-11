@@ -13,13 +13,11 @@ def test_health_check():
 def test_create_shift_validation():
     payload = {
         "platform": "Uber",
-        "work_date": "2026-10-11",
+        "date": "2026-10-11",
         "hours_worked": 8.0,
         "gross_earned": 5000.0,
         "deductions": 200.0,
-        "commission": 500.0,
         "net_received": 6000.0,
-        "status": "pending"
     }
     response = client.post("/shifts", json=payload)
     assert response.status_code == 400

@@ -14,7 +14,7 @@ class Settings:
     jwt_secret: str = os.getenv("JWT_SECRET", "change-this-development-secret-now")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     minimum_group_size: int = int(os.getenv("K_ANONYMITY_MIN_GROUP", "5"))
+    frontend_origin: str = os.getenv("FRONTEND_ORIGIN", os.getenv("CORS_ORIGINS", "http://localhost:5173"))
 
 
 settings = Settings()
-

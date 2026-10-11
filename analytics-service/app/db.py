@@ -12,6 +12,7 @@ pool = ConnectionPool(
     min_size=1,
     max_size=5,
     kwargs={"row_factory": dict_row},
+    check=ConnectionPool.check_connection,
     open=False,
 )
 
@@ -19,4 +20,3 @@ pool = ConnectionPool(
 def get_connection() -> Generator[Connection, None, None]:
     with pool.connection() as connection:
         yield connection
-
