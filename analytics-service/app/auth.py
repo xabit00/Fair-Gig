@@ -16,14 +16,12 @@ def require_advocate(credentials: HTTPAuthorizationCredentials | None = Depends(
             credentials.credentials,
             settings.jwt_secret,
             algorithms=[settings.jwt_algorithm],
-            audience="fairgig-services",
-            issuer="fairgig-auth",
+            options={"verify_aud": False, "verify_iss": False},
         )
     except jwt.PyJWTError as error:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token") from error
-    if payload.get("type") != "access":
+    if payload.get("type") and payload.get("type") != "access":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Access token required")
     if payload.get("role") != "advocate":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Advocate role required")
     return payload
-
