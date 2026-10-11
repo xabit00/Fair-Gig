@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FileCsv, UploadSimple, Warning } from "@phosphor-icons/react";
 import { useAuth } from "../auth/AuthContext";
 import { Button, Card, Input, useToast } from "../components/ui";
 import { isDemoMode, sampleShifts } from "../mocks/data";
-import { DemoNotice, EndpointUnavailable, Page, ShiftTable, formatPKR, platformOptions } from "./shared";
+import { DemoNotice, Page, ShiftTable, formatPKR, platformOptions } from "./shared";
 
 const emptyShift = {
   platform: "inDrive",
@@ -28,6 +28,18 @@ export default function EarningsLogger() {
   const [csvError, setCsvError] = useState("");
   const net = Math.max(0, Number(form.gross_earned || 0) - Number(form.deductions || 0));
 
+  async function loadShifts() {
+    if (demo) return;
+    try {
+      const response = await api.get("earnings", "/shifts");
+      setShifts(response.shifts || []);
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  }
+
+  useEffect(() => { loadShifts(); }, [demo]);
+
   function update(name, value) {
     setForm((current) => ({ ...current, [name]: value }));
     setErrors((current) => ({ ...current, [name]: "" }));
@@ -51,12 +63,17 @@ export default function EarningsLogger() {
         notify(editingId ? "Sample shift updated locally." : "Sample shift added locally.", "success");
         setForm(emptyShift);
         setEditingId(null);
-      } else if (editingId) {
-        notify("Editing is unavailable until the earnings service adds PATCH /shifts/{id}.", "info");
       } else {
-        const response = await api.post("earnings", "/shifts", payload);
+        const response = editingId
+          ? await api.patch("earnings", `/shifts/${editingId}`, payload)
+          : await api.post("earnings", "/shifts", payload);
         if (response?.stub) notify("The backend validated this shift but did not persist it because the endpoint is still a Level 1 stub.", "info");
-        else { notify("Shift saved.", "success"); setForm(emptyShift); }
+        else {
+          notify(editingId ? "Shift updated." : "Shift saved.", "success");
+          setForm(emptyShift);
+          setEditingId(null);
+          await loadShifts();
+        }
       }
     } catch (error) {
       notify(error.message, "error");
@@ -71,9 +88,19 @@ export default function EarningsLogger() {
     document.querySelector("#shift-form")?.scrollIntoView({ behavior: "smooth" });
   }
 
-  function deleteShift(id) {
-    setShifts((items) => items.filter((item) => item.id !== id));
-    notify("Sample shift removed locally.", "info");
+  async function deleteShift(id) {
+    if (demo) {
+      setShifts((items) => items.filter((item) => item.id !== id));
+      notify("Sample shift removed locally.", "info");
+      return;
+    }
+    try {
+      await api.delete("earnings", `/shifts/${id}`);
+      setShifts((items) => items.filter((item) => item.id !== id));
+      notify("Shift deleted.", "success");
+    } catch (error) {
+      notify(error.message, "error");
+    }
   }
 
   function parseCsv(text) {
@@ -112,7 +139,7 @@ export default function EarningsLogger() {
       {!demo && <div className="data-note"><Warning size={18} /><span>The Level 1 earnings endpoints validate submissions but currently return <strong>stub: true</strong>. FairGig will never label a stub response as saved.</span></div>}
       <div className="two-column earnings-layout">
         <Card id="shift-form">
-          <div className="section-head"><div><h2>{editingId ? "Edit sample shift" : "Log a shift"}</h2><p>Net earnings are calculated automatically.</p></div></div>
+          <div className="section-head"><div><h2>{editingId ? "Edit shift" : "Log a shift"}</h2><p>Net earnings are calculated automatically.</p></div></div>
           <form className="form-grid" onSubmit={submit} noValidate>
             <label className="ui-field"><span className="ui-field__label">Platform</span><select value={form.platform} onChange={(event) => update("platform", event.target.value)}>{platformOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
             <Input label="Date" name="date" type="date" value={form.date} onChange={(event) => update("date", event.target.value)} required />
@@ -121,7 +148,7 @@ export default function EarningsLogger() {
             <Input label="Deductions (PKR)" name="deductions" type="number" min="0" step="0.01" value={form.deductions} error={errors.deductions} onChange={(event) => update("deductions", event.target.value)} />
             <Input label="Net received (PKR)" name="net_received" type="number" value={net} readOnly hint="Gross earnings minus deductions." />
             <Input className="form-grid__wide" label="Screenshot URL" name="screenshot_url" type="url" value={form.screenshot_url} onChange={(event) => update("screenshot_url", event.target.value)} placeholder="https://..." hint="The current API stores a reference URL, not a binary upload." />
-            <div className="button-row form-grid__wide"><Button type="submit" loading={submitting}>{editingId ? "Update sample" : "Submit shift"}</Button>{editingId && <Button type="button" variant="ghost" onClick={() => { setEditingId(null); setForm(emptyShift); }}>Cancel</Button>}</div>
+            <div className="button-row form-grid__wide"><Button type="submit" loading={submitting}>{editingId ? "Update shift" : "Submit shift"}</Button>{editingId && <Button type="button" variant="ghost" onClick={() => { setEditingId(null); setForm(emptyShift); }}>Cancel</Button>}</div>
           </form>
         </Card>
 
@@ -140,8 +167,8 @@ export default function EarningsLogger() {
       </div>
 
       <section className="page-section">
-        <div className="section-head"><div><h2>Shift history</h2><p>{demo ? "Development sample records stored only in this page session." : "A history endpoint is not available yet."}</p></div></div>
-        {demo ? <Card padded={false}><ShiftTable shifts={shifts} onEdit={editShift} onDelete={deleteShift} /></Card> : <EndpointUnavailable title="Shift history is unavailable" message="Ask the Backend Services teammate to add GET /shifts, PATCH /shifts/{id}, and DELETE /shifts/{id}. The submission form remains connected to the documented POST endpoint." />}
+        <div className="section-head"><div><h2>Shift history</h2><p>{demo ? "Development sample records stored only in this page session." : "Your persisted earnings records."}</p></div></div>
+        <Card padded={false}><ShiftTable shifts={shifts} onEdit={editShift} onDelete={deleteShift} /></Card>
       </section>
     </Page>
   );

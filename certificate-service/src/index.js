@@ -3,6 +3,7 @@ const authenticate = require("./auth");
 const { port, FRONTEND_ORIGIN, frontendOrigin } = require("./config");
 const pool = require("./db");
 const renderCertificate = require("./template");
+const renderPdf = require("./pdf");
 
 const app = express();
 
@@ -68,8 +69,13 @@ function validateDateRange(from, to) {
   return { valid: true, fromDate, toDate };
 }
 
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", service: "certificate" });
+app.get("/health", async (_req, res) => {
+  try {
+    await pool.query("SELECT 1");
+    res.json({ status: "ok", service: "certificate-service", database: "connected" });
+  } catch (_error) {
+    res.status(503).json({ status: "unhealthy", service: "certificate-service", database: "unavailable" });
+  }
 });
 
 async function buildIncomeSummary(dbPool, workerId, from, to) {
@@ -79,6 +85,8 @@ async function buildIncomeSummary(dbPool, workerId, from, to) {
        COALESCE(SUM(deductions), 0) AS total_deductions,
        COALESCE(SUM(net_received), 0) AS total_net,
        COALESCE(SUM(hours_worked), 0) AS total_hours,
+       COUNT(*) AS total_shifts,
+       COUNT(*) FILTER (WHERE verification_status = 'confirmed') AS verified_shifts,
        COALESCE(SUM(CASE WHEN verification_status = 'confirmed' OR verification_status = 'verified' THEN net_received ELSE 0 END), 0) AS verified_net,
        COALESCE(SUM(CASE WHEN verification_status IS NULL OR (verification_status != 'confirmed' AND verification_status != 'verified') THEN net_received ELSE 0 END), 0) AS worker_reported_net
      FROM shifts
@@ -95,6 +103,8 @@ async function buildIncomeSummary(dbPool, workerId, from, to) {
     total_deductions: Number(row.total_deductions || 0),
     total_net: Number(row.total_net || 0),
     total_hours: Number(row.total_hours || 0),
+    total_shifts: Number(row.total_shifts || 0),
+    verified_shifts: Number(row.verified_shifts || 0),
     verified_net: Number(row.verified_net || 0),
     worker_reported_net: Number(row.worker_reported_net || 0),
   };
@@ -170,7 +180,7 @@ app.get(
         generated_at: new Date().toISOString(),
       };
 
-      const pdfContent = renderCertificate(payload);
+      const pdfContent = await renderPdf(payload);
 
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader(

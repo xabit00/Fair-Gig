@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { FileText, Printer, Warning } from "@phosphor-icons/react";
+import { DownloadSimple, FileText, Printer, Warning } from "@phosphor-icons/react";
 import { useAuth } from "../auth/AuthContext";
 import { Button, Card, Input, useToast } from "../components/ui";
 import { isDemoMode } from "../mocks/data";
@@ -19,24 +19,76 @@ export default function IncomeCertificate() {
   const { notify } = useToast();
   const demo = isDemoMode();
   const frameRef = useRef(null);
-  const [form, setForm] = useState({ period: "July to September 2026", netIncome: demo ? "194250" : "", verifiedIncome: demo ? "162400" : "", verifiedShifts: demo ? "41" : "" });
+  const [form, setForm] = useState(() => {
+    const to = new Date();
+    const from = new Date(to);
+    from.setDate(from.getDate() - 89);
+    return {
+      from: from.toISOString().slice(0, 10),
+      to: to.toISOString().slice(0, 10),
+      period: "July to September 2026",
+      netIncome: demo ? "194250" : "",
+      verifiedIncome: demo ? "162400" : "",
+      verifiedShifts: demo ? "41" : "",
+    };
+  });
   const [html, setHtml] = useState("");
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   async function preview(event) {
     event.preventDefault();
-    if (!form.period || !form.netIncome) return notify("Enter a period and net income amount.", "error");
+    if (demo && (!form.period || !form.netIncome)) return notify("Enter a period and net income amount.", "error");
+    if (!demo && (!form.from || !form.to || form.from > form.to)) return notify("Choose a valid date range.", "error");
     setLoading(true);
     try {
-      const nextHtml = demo
-        ? demoCertificateHtml({ name: user.name, ...form })
-        : await api.post("certificate", "/certificates/preview", { worker_id: user.id, worker_name: user.name, period: form.period, net_income: Number(form.netIncome), verified_shifts: Number(form.verifiedShifts || 0) });
+      let nextHtml;
+      if (demo) {
+        nextHtml = demoCertificateHtml({ name: user.name, ...form });
+      } else {
+        const summary = await api.get("certificate", `/certificates/income/summary?from=${form.from}&to=${form.to}`);
+        const nextForm = {
+          ...form,
+          period: `${form.from} to ${form.to}`,
+          netIncome: String(summary.total_net),
+          verifiedIncome: String(summary.verified_net),
+          verifiedShifts: String(summary.verified_shifts),
+        };
+        setForm(nextForm);
+        nextHtml = await api.post("certificate", "/certificates/preview", {
+          worker_id: user.id,
+          worker_name: user.name,
+          period: nextForm.period,
+          gross: summary.total_gross,
+          deductions: summary.total_deductions,
+          net_income: summary.total_net,
+          total_hours: summary.total_hours,
+          verified_status: summary.verified_net > 0 ? "Partially or fully verified" : "Worker reported",
+        });
+      }
       setHtml(nextHtml);
       notify(demo ? "Development sample preview created." : "Certificate preview created.", "success");
     } catch (error) {
       notify(error.message, "error");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function downloadCertificate() {
+    setDownloading(true);
+    try {
+      const blob = await api.download("certificate", `/certificates/income?from=${form.from}&to=${form.to}`);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `FairGig-Income-${form.from}_${form.to}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      notify(error.message, "error");
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -48,20 +100,20 @@ export default function IncomeCertificate() {
   }
 
   return (
-    <Page eyebrow="Portable income record" title="Income certificate" description="Create a print-friendly summary for documentation, applications, or your own records." action={html && <Button type="button" variant="secondary" onClick={printCertificate}><Printer size={18} />Print preview</Button>}>
+    <Page eyebrow="Portable income record" title="Income certificate" description="Create a print-friendly summary for documentation, applications, or your own records." action={html && <div className="button-row"><Button type="button" variant="secondary" onClick={printCertificate}><Printer size={18} />Print preview</Button>{!demo && <Button type="button" onClick={downloadCertificate} loading={downloading}><DownloadSimple size={18} />Download PDF</Button>}</div>}>
       {demo && <DemoNotice />}
       <div className="two-column certificate-layout">
         <Card>
           <div className="section-head"><div><h2>Certificate details</h2><p>The preview uses your signed-in account name.</p></div></div>
           <form className="certificate-form" onSubmit={preview}>
             <Input label="Worker name" name="worker_name" value={user.name} readOnly />
-            <Input label="Period" name="period" value={form.period} onChange={(event) => setForm({ ...form, period: event.target.value })} placeholder="July to September 2026" />
-            <Input label="Net income (PKR)" name="net_income" type="number" min="0" value={form.netIncome} onChange={(event) => setForm({ ...form, netIncome: event.target.value })} />
-            <Input label="Verified income (PKR)" name="verified_income" type="number" min="0" max={form.netIncome || undefined} value={form.verifiedIncome} onChange={(event) => setForm({ ...form, verifiedIncome: event.target.value })} hint="The remainder is shown as self-reported." />
-            <Input label="Verified shifts" name="verified_shifts" type="number" min="0" value={form.verifiedShifts} onChange={(event) => setForm({ ...form, verifiedShifts: event.target.value })} />
+            {demo ? <Input label="Period" name="period" value={form.period} onChange={(event) => setForm({ ...form, period: event.target.value })} placeholder="July to September 2026" /> : <><Input label="From" name="from" type="date" value={form.from} onChange={(event) => setForm({ ...form, from: event.target.value })} /><Input label="To" name="to" type="date" value={form.to} onChange={(event) => setForm({ ...form, to: event.target.value })} /></>}
+            <Input label="Net income (PKR)" name="net_income" type="number" min="0" value={form.netIncome} readOnly={!demo} onChange={(event) => setForm({ ...form, netIncome: event.target.value })} hint={demo ? undefined : "Calculated from persisted shifts."} />
+            <Input label="Verified income (PKR)" name="verified_income" type="number" min="0" max={form.netIncome || undefined} value={form.verifiedIncome} readOnly={!demo} onChange={(event) => setForm({ ...form, verifiedIncome: event.target.value })} hint="The remainder is shown as worker-reported." />
+            <Input label="Verified shifts" name="verified_shifts" type="number" min="0" value={form.verifiedShifts} readOnly={!demo} onChange={(event) => setForm({ ...form, verifiedShifts: event.target.value })} />
             <Button type="submit" loading={loading}><FileText size={18} />Generate preview</Button>
           </form>
-          <div className="data-note certificate-note"><Warning size={18} /><span>The current certificate API accepts supplied totals and does not calculate them from earnings. A verifiable reference URL and QR code are also not available yet. Treat the output as a preview until Backend Services connects persisted shifts.</span></div>
+          <div className="data-note certificate-note"><Warning size={18} /><span>{demo ? "Development mode uses labeled sample totals." : "Income totals are calculated from your persisted shifts. Verification applies only to records marked confirmed; a public verification URL and QR code are not available yet."}</span></div>
         </Card>
         <Card className="certificate-placeholder">
           <FileText size={42} />

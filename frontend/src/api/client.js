@@ -78,7 +78,7 @@ async function send(service, path, options, accessToken) {
   } catch (_error) {
     throw new ApiError("Could not reach the server. Please try again.");
   }
-  const data = await parseBody(response);
+  const data = options.responseType === "blob" ? await response.blob() : await parseBody(response);
   return { response, data };
 }
 
@@ -143,4 +143,5 @@ export const api = {
   patch: (service, path, body, options) => apiRequest(service, path, { ...options, method: "PATCH", body }),
   put: (service, path, body, options) => apiRequest(service, path, { ...options, method: "PUT", body }),
   delete: (service, path, options) => apiRequest(service, path, { ...options, method: "DELETE" }),
+  download: (service, path, options) => apiRequest(service, path, { ...options, method: "GET", responseType: "blob" }),
 };

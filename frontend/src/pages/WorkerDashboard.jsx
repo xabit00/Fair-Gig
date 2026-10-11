@@ -1,28 +1,62 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Clock, CurrencyCircleDollar, Plus, ShieldCheck, TrendDown, Wallet } from "@phosphor-icons/react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useAuth } from "../auth/AuthContext";
-import { Card, KpiCard } from "../components/ui";
+import { Card, KpiCard, Skeleton } from "../components/ui";
 import { commissionTrend, hourlyTrend, incomeTrend, isDemoMode, sampleShifts, weeklyIncome, workerAnomalies, workerSummary } from "../mocks/data";
 import { ChartCard, ChartTooltip, DemoNotice, EndpointUnavailable, Page, ShiftTable, chartColors, formatPKR } from "./shared";
 
 export default function WorkerDashboard() {
-  const { user } = useAuth();
+  const { user, api } = useAuth();
   const demo = isDemoMode();
   const firstName = user.name.split(" ")[0];
+  const [live, setLive] = useState({ loading: !demo, error: "", summary: null, shifts: [], anomalies: [] });
+
+  async function loadLiveData() {
+    if (demo) return;
+    setLive((current) => ({ ...current, loading: true, error: "" }));
+    try {
+      const [summary, shiftResponse] = await Promise.all([
+        api.get("earnings", "/earnings/summary"),
+        api.get("earnings", "/shifts"),
+      ]);
+      const shifts = shiftResponse.shifts || [];
+      let anomalies = [];
+      if (shifts.length) {
+        const result = await api.post("anomaly", "/detect", {
+          worker_id: user.id,
+          earnings: shifts.map(({ date, platform, gross_earned, deductions, net_received }) => ({ date, platform, gross_earned, deductions, net_received })),
+        });
+        anomalies = result.anomalies || [];
+      }
+      setLive({ loading: false, error: "", summary, shifts, anomalies });
+    } catch (error) {
+      setLive({ loading: false, error: error.message, summary: null, shifts: [], anomalies: [] });
+    }
+  }
+
+  useEffect(() => { loadLiveData(); }, [demo, user.id]);
 
   if (!demo) {
+    const verifiedIncome = live.shifts.filter((shift) => shift.verification_status === "confirmed").reduce((sum, shift) => sum + Number(shift.net_received), 0);
+    const deductionPercent = Number(live.summary?.total_gross) > 0
+      ? Number(live.summary.total_deductions) / Number(live.summary.total_gross) * 100
+      : 0;
     return (
-      <Page eyebrow="Worker overview" title={`Good to see you, ${firstName}`} description="Your verified income record and recent changes will appear here.">
-        <div className="kpi-grid muted-kpis">
-          <KpiCard label="Total earnings" value="Unavailable" icon={Wallet} />
-          <KpiCard label="Average hourly rate" value="Unavailable" icon={Clock} />
-          <KpiCard label="Verified earnings" value="Unavailable" icon={ShieldCheck} />
-          <KpiCard label="Average commission" value="Unavailable" icon={CurrencyCircleDollar} />
-        </div>
-        <section className="page-section">
-          <EndpointUnavailable title="Earnings history endpoint needed" message="The earnings service can create shifts but does not yet provide a worker shift list or summary. Ask the Backend Services teammate to add authenticated GET /shifts and GET /shifts/summary endpoints. Use ?demo=1 during development to inspect this dashboard with labeled sample data." />
-        </section>
+      <Page eyebrow="Worker overview" title={`Good to see you, ${firstName}`} description="Your persisted income record, verification progress, and unusual changes." action={<Link className="ui-button ui-button--primary" to="/earnings"><Plus size={18} />Log a shift</Link>}>
+        {live.loading && <div className="kpi-grid"><Skeleton height="9.5rem" /><Skeleton height="9.5rem" /><Skeleton height="9.5rem" /><Skeleton height="9.5rem" /></div>}
+        {!live.loading && live.error && <EndpointUnavailable title="Worker data is unavailable" message={live.error} retry={loadLiveData} />}
+        {!live.loading && !live.error && <>
+          <div className="kpi-grid">
+            <KpiCard label="Total earnings" value={formatPKR(live.summary?.total_net || 0)} trend={`${live.summary?.total_shifts || 0} shifts recorded`} icon={Wallet} />
+            <KpiCard label="Average hourly rate" value={formatPKR(live.summary?.effective_hourly_rate || 0)} trend={`${Number(live.summary?.total_hours || 0).toFixed(1)} hours recorded`} icon={Clock} />
+            <KpiCard label="Verified earnings" value={formatPKR(verifiedIncome)} trend={`${live.shifts.filter((shift) => shift.verification_status === "confirmed").length} confirmed shifts`} icon={ShieldCheck} />
+            <KpiCard label="Effective deductions" value={`${deductionPercent.toFixed(1)}%`} icon={CurrencyCircleDollar} />
+          </div>
+          {live.anomalies.length > 0 && <section className="page-section"><Card className="anomaly-card"><div className="section-head"><div><h2>Needs attention</h2><p>Patterns detected from your persisted earnings.</p></div></div><div className="anomaly-list">{live.anomalies.map((item, index) => <article className="anomaly-item anomaly-item--warning" key={`${item.type}-${index}`}><TrendDown size={22} /><div><strong>{item.type === "high_deduction" ? "Unusually high deduction" : "Income decline"}</strong><p>{item.explanation}</p></div></article>)}</div></Card></section>}
+          <section className="page-section"><div className="section-head"><div><h2>Recent shifts</h2><p>Your latest persisted earnings records.</p></div><Link className="text-link" to="/earnings">View all</Link></div><Card padded={false}><ShiftTable shifts={live.shifts.slice(0, 5)} /></Card></section>
+        </>}
       </Page>
     );
   }

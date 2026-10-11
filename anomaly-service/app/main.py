@@ -2,12 +2,12 @@ from contextlib import asynccontextmanager
 from datetime import date
 from uuid import UUID
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Response, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from psycopg import Connection
-
 from .auth import require_roles
-from .db import get_connection, pool
+from .config import settings
+from .db import pool
 from .detector import detect_anomalies
 
 
@@ -37,12 +37,24 @@ app = FastAPI(
     description="Flags unusual deductions and month-on-month net income drops.",
     lifespan=lifespan,
 )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(settings.cors_origins),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
-def health(connection: Connection = Depends(get_connection)) -> dict:
-    connection.execute("SELECT 1")
-    return {"service": "anomaly-service", "status": "ok", "database": "connected"}
+def health(response: Response) -> dict:
+    try:
+        with pool.connection() as connection:
+            connection.execute("SELECT 1")
+        return {"service": "anomaly-service", "status": "ok", "database": "connected"}
+    except Exception:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"service": "anomaly-service", "status": "unhealthy", "database": "unavailable"}
 
 
 @app.get("/rules")
@@ -68,4 +80,3 @@ def detect(
         "anomalies": anomalies,
         "summary": f"Found {len(anomalies)} item(s) that may need review.",
     }
-

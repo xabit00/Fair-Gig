@@ -28,8 +28,9 @@ app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_origin], all
 
 
 @app.get("/health")
-def health() -> dict:
-    return {"status": "ok", "service": "analytics"}
+def health(connection: Connection = Depends(get_connection)) -> dict:
+    connection.execute("SELECT 1")
+    return {"status": "ok", "service": "analytics-service", "database": "connected"}
 
 
 @app.get("/kpis")
@@ -150,9 +151,9 @@ def analytics_overview(
 
     worker_rows = connection.execute(
         """
-        SELECT worker_id, SUM(net_amount) AS net_sum
+        SELECT worker_id, SUM(net_received) AS net_sum
         FROM shifts
-        WHERE shift_date >= %s AND shift_date <= %s
+        WHERE date >= %s AND date <= %s
         GROUP BY worker_id
         """,
         (start_date, end_date),
@@ -160,14 +161,16 @@ def analytics_overview(
 
     net_sums = [float(row["net_sum"]) for row in worker_rows if row.get("net_sum") is not None]
     total_workers = len(worker_rows)
+    if total_workers < settings.minimum_group_size:
+        return {"suppressed": True, "minimum_group_size": settings.minimum_group_size}
     avg_net_earnings = round(float(sum(net_sums) / total_workers), 2) if total_workers > 0 else 0.0
     median_net_earnings = round(float(statistics.median(net_sums)), 2) if total_workers > 0 else 0.0
 
     comm_row = connection.execute(
         """
-        SELECT AVG(commission_amount / gross_amount * 100.0) AS avg_commission_pct
+        SELECT AVG(deductions / gross_earned * 100.0) AS avg_commission_pct
         FROM shifts
-        WHERE shift_date >= %s AND shift_date <= %s AND gross_amount > 0
+        WHERE date >= %s AND date <= %s AND gross_earned > 0
         """,
         (start_date, end_date),
     ).fetchone()
@@ -177,6 +180,8 @@ def analytics_overview(
         avg_commission_pct = round(float(comm_row["avg_commission_pct"]), 2)
 
     return {
+        "suppressed": False,
+        "minimum_group_size": settings.minimum_group_size,
         "total_workers": total_workers,
         "avg_net_earnings": avg_net_earnings,
         "median_net_earnings": median_net_earnings,
@@ -196,14 +201,15 @@ def earnings_trends(
 ) -> list[dict]:
     rows = connection.execute(
         """
-        SELECT TO_CHAR(DATE_TRUNC('month', shift_date), 'YYYY-MM') AS label,
-               ROUND(SUM(net_amount)::numeric, 2) AS total_net,
+        SELECT TO_CHAR(DATE_TRUNC('month', date), 'YYYY-MM') AS label,
+               ROUND(SUM(net_received)::numeric, 2) AS total_net,
                COUNT(DISTINCT worker_id) AS worker_count
         FROM shifts
-        GROUP BY DATE_TRUNC('month', shift_date)
-        HAVING COUNT(DISTINCT worker_id) >= 5
-        ORDER BY DATE_TRUNC('month', shift_date) ASC
-        """
+        GROUP BY DATE_TRUNC('month', date)
+        HAVING COUNT(DISTINCT worker_id) >= %s
+        ORDER BY DATE_TRUNC('month', date) ASC
+        """,
+        (settings.minimum_group_size,),
     ).fetchall()
 
     return [
@@ -227,13 +233,13 @@ def analytics_platforms(
     params = []
     if from_date:
         try:
-            conditions.append("shift_date >= %s")
+            conditions.append("date >= %s")
             params.append(date.fromisoformat(from_date.split("T")[0]))
         except Exception:
             pass
     if to_date:
         try:
-            conditions.append("shift_date <= %s")
+            conditions.append("date <= %s")
             params.append(date.fromisoformat(to_date.split("T")[0]))
         except Exception:
             pass
@@ -242,15 +248,15 @@ def analytics_platforms(
 
     query = f"""
         SELECT platform AS label,
-               ROUND((SUM(net_amount) / NULLIF(COUNT(DISTINCT worker_id), 0))::numeric, 2) AS avg_net_per_worker,
+               ROUND((SUM(net_received) / NULLIF(COUNT(DISTINCT worker_id), 0))::numeric, 2) AS avg_net_per_worker,
                COUNT(DISTINCT worker_id) AS worker_count
         FROM shifts
         {where_sql}
         GROUP BY platform
-        HAVING COUNT(DISTINCT worker_id) >= 5
+        HAVING COUNT(DISTINCT worker_id) >= %s
         ORDER BY platform ASC
     """
-    rows = connection.execute(query, tuple(params)).fetchall()
+    rows = connection.execute(query, (*params, settings.minimum_group_size)).fetchall()
 
     return [
         {
@@ -269,17 +275,17 @@ def analytics_zones(
     connection: Connection = Depends(get_connection),
     _: dict = Depends(require_advocate),
 ) -> list[dict]:
-    conditions = ["city_zone IS NOT NULL"]
+    conditions = ["u.city_zone IS NOT NULL"]
     params = []
     if from_date:
         try:
-            conditions.append("shift_date >= %s")
+            conditions.append("s.date >= %s")
             params.append(date.fromisoformat(from_date.split("T")[0]))
         except Exception:
             pass
     if to_date:
         try:
-            conditions.append("shift_date <= %s")
+            conditions.append("s.date <= %s")
             params.append(date.fromisoformat(to_date.split("T")[0]))
         except Exception:
             pass
@@ -287,16 +293,17 @@ def analytics_zones(
     where_sql = f"WHERE {' AND '.join(conditions)}"
 
     query = f"""
-        SELECT city_zone AS label,
-               ROUND((SUM(net_amount) / NULLIF(COUNT(DISTINCT worker_id), 0))::numeric, 2) AS avg_net_per_worker,
-               COUNT(DISTINCT worker_id) AS worker_count
-        FROM shifts
+        SELECT u.city_zone AS label,
+               ROUND((SUM(s.net_received) / NULLIF(COUNT(DISTINCT s.worker_id), 0))::numeric, 2) AS avg_net_per_worker,
+               COUNT(DISTINCT s.worker_id) AS worker_count
+        FROM shifts s
+        JOIN users u ON u.id = s.worker_id
         {where_sql}
-        GROUP BY city_zone
-        HAVING COUNT(DISTINCT worker_id) >= 5
-        ORDER BY city_zone ASC
+        GROUP BY u.city_zone
+        HAVING COUNT(DISTINCT s.worker_id) >= %s
+        ORDER BY u.city_zone ASC
     """
-    rows = connection.execute(query, tuple(params)).fetchall()
+    rows = connection.execute(query, (*params, settings.minimum_group_size)).fetchall()
 
     return [
         {
@@ -339,10 +346,10 @@ def analytics_grievances(
         FROM grievances
         {where_sql}
         GROUP BY category
-        HAVING COUNT(DISTINCT worker_id) >= 5
+        HAVING COUNT(DISTINCT worker_id) >= %s
         ORDER BY category ASC
     """
-    rows = connection.execute(query, tuple(params)).fetchall()
+    rows = connection.execute(query, (*params, settings.minimum_group_size)).fetchall()
 
     return [
         {
@@ -362,9 +369,9 @@ def analytics_vulnerability(
 ) -> list[dict]:
     month_rows = connection.execute(
         """
-        SELECT DISTINCT DATE_TRUNC('month', shift_date) AS m
+        SELECT DISTINCT DATE_TRUNC('month', date) AS m
         FROM shifts
-        WHERE shift_date IS NOT NULL
+        WHERE date IS NOT NULL
         ORDER BY m DESC
         LIMIT %s
         """,
@@ -380,10 +387,10 @@ def analytics_vulnerability(
     worker_rows = connection.execute(
         """
         SELECT worker_id,
-               SUM(CASE WHEN DATE_TRUNC('month', shift_date) = %s THEN net_amount ELSE 0 END) AS curr_net,
-               SUM(CASE WHEN DATE_TRUNC('month', shift_date) = %s THEN net_amount ELSE 0 END) AS prev_net
+               SUM(CASE WHEN DATE_TRUNC('month', date) = %s THEN net_received ELSE 0 END) AS curr_net,
+               SUM(CASE WHEN DATE_TRUNC('month', date) = %s THEN net_received ELSE 0 END) AS prev_net
         FROM shifts
-        WHERE DATE_TRUNC('month', shift_date) IN (%s, %s)
+        WHERE DATE_TRUNC('month', date) IN (%s, %s)
         GROUP BY worker_id
         """,
         (curr_month, prev_month, curr_month, prev_month),
@@ -404,7 +411,7 @@ def analytics_vulnerability(
         SELECT platform, worker_id
         FROM shifts
         WHERE platform IS NOT NULL
-          AND DATE_TRUNC('month', shift_date) IN (%s, %s)
+          AND DATE_TRUNC('month', date) IN (%s, %s)
         GROUP BY platform, worker_id
         """,
         (curr_month, prev_month),
@@ -417,11 +424,12 @@ def analytics_vulnerability(
 
     zone_worker_rows = connection.execute(
         """
-        SELECT city_zone, worker_id
-        FROM shifts
-        WHERE city_zone IS NOT NULL
-          AND DATE_TRUNC('month', shift_date) IN (%s, %s)
-        GROUP BY city_zone, worker_id
+        SELECT u.city_zone, s.worker_id
+        FROM shifts s
+        JOIN users u ON u.id = s.worker_id
+        WHERE u.city_zone IS NOT NULL
+          AND DATE_TRUNC('month', s.date) IN (%s, %s)
+        GROUP BY u.city_zone, s.worker_id
         """,
         (curr_month, prev_month),
     ).fetchall()
@@ -437,9 +445,9 @@ def analytics_vulnerability(
     for plat in sorted(platform_workers):
         workers_in_group = platform_workers[plat]
         group_size = len(workers_in_group)
-        if group_size < 5:
+        if group_size < settings.minimum_group_size:
             continue
-        if 0 < (total_platform_workers - group_size) < 5:
+        if 0 < (total_platform_workers - group_size) < settings.minimum_group_size:
             continue
         dec_count = sum(1 for w in workers_in_group if w in declining_workers)
         results.append({
@@ -453,9 +461,9 @@ def analytics_vulnerability(
     for zone in sorted(zone_workers):
         workers_in_group = zone_workers[zone]
         group_size = len(workers_in_group)
-        if group_size < 5:
+        if group_size < settings.minimum_group_size:
             continue
-        if 0 < (total_zone_workers - group_size) < 5:
+        if 0 < (total_zone_workers - group_size) < settings.minimum_group_size:
             continue
         dec_count = sum(1 for w in workers_in_group if w in declining_workers)
         results.append({

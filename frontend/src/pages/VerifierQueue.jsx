@@ -1,30 +1,64 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle, FileText, Flag, XCircle } from "@phosphor-icons/react";
-import { Button, Card, EmptyState, StatusBadge, useToast } from "../components/ui";
+import { useAuth } from "../auth/AuthContext";
+import { Button, Card, EmptyState, Skeleton, StatusBadge, useToast } from "../components/ui";
 import { isDemoMode, verificationQueue } from "../mocks/data";
 import { DemoNotice, EndpointUnavailable, Page, formatDate, formatPKR, titleCase } from "./shared";
 
 export default function VerifierQueue({ view = "all" }) {
+  const { api } = useAuth();
   const { notify } = useToast();
   const demo = isDemoMode();
   const [records, setRecords] = useState(demo ? verificationQueue : []);
   const [selectedId, setSelectedId] = useState(demo ? verificationQueue[0].id : null);
   const [note, setNote] = useState("");
+  const [loading, setLoading] = useState(!demo);
+  const [error, setError] = useState("");
   const filtered = records.filter((item) => view === "pending" ? item.verification_status === "pending" : view === "history" ? item.verification_status !== "pending" : true);
   const selected = records.find((item) => item.id === selectedId) || filtered[0];
 
-  function decide(status) {
-    if (!selected || !demo) return;
-    setRecords((items) => items.map((item) => item.id === selected.id ? { ...item, verification_status: status, verifier_note: note } : item));
-    notify(`Sample record marked ${titleCase(status).toLowerCase()} locally.`, "success");
-    setNote("");
+  async function load() {
+    if (demo) return;
+    setLoading(true);
+    setError("");
+    try {
+      const query = view === "pending" ? "?verification_status=pending" : "";
+      const response = await api.get("earnings", `/shifts/verification-queue${query}`);
+      const nextRecords = response.shifts || [];
+      setRecords(nextRecords);
+      setSelectedId((current) => current && nextRecords.some((item) => item.id === current) ? current : nextRecords[0]?.id || null);
+    } catch (loadError) {
+      setError(loadError.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(); }, [demo, view]);
+
+  async function decide(status) {
+    if (!selected) return;
+    if (demo) {
+      setRecords((items) => items.map((item) => item.id === selected.id ? { ...item, verification_status: status, verifier_note: note } : item));
+      notify(`Sample record marked ${titleCase(status).toLowerCase()} locally.`, "success");
+      setNote("");
+      return;
+    }
+    try {
+      const updated = await api.patch("earnings", `/shifts/${selected.id}/verification`, { verification_status: status, note: note || null });
+      setRecords((items) => items.map((item) => item.id === selected.id ? { ...item, ...updated } : item));
+      notify(updated.note_persisted === false && note ? "Decision saved. Notes are not persisted by the current database schema." : "Verification decision saved.", updated.note_persisted === false && note ? "info" : "success");
+      setNote("");
+    } catch (decisionError) {
+      notify(decisionError.message, "error");
+    }
   }
 
   const titles = { all: "Verification queue", pending: "Pending reviews", history: "Review history" };
   return (
     <Page eyebrow="Evidence review" title={titles[view]} description="Compare submitted earnings with their evidence and record a clear decision.">
       {demo && <DemoNotice />}
-      {!demo ? <EndpointUnavailable title="Verification queue endpoint needed" message="The earnings service can update a known shift, but it cannot list submitted shifts. Ask the Backend Services teammate to add GET /shifts/verification-queue for verifiers. No mock records are shown unless ?demo=1 is explicitly enabled." /> : (
+      {!demo && loading ? <Skeleton height="22rem" /> : !demo && error ? <EndpointUnavailable title="Could not load verification queue" message={error} retry={load} /> : (
         <div className="review-layout">
           <Card className="review-list" padded={false}>
             <div className="review-list__head"><strong>{filtered.length} records</strong><span>{titleCase(view)}</span></div>
