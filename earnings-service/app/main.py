@@ -34,9 +34,8 @@ class ShiftUpdate(BaseModel):
 @app.get("/health")
 def health_check():
     try:
-        conn = get_connection()
-        conn.execute("SELECT 1")
-        conn.close()
+        with get_connection() as conn:
+            conn.execute("SELECT 1")
         return {"status": "healthy", "service": "earnings-service", "database": "connected"}
     except Exception as e:
         return {"status": "unhealthy", "service": "earnings-service", "error": str(e)}
@@ -48,8 +47,7 @@ def create_shift(shift: ShiftCreate, token_data: dict = Depends(verify_token)):
     if shift.net_received > shift.gross_earned:
         raise HTTPException(status_code=400, detail="Net received cannot exceed gross earned.")
 
-    conn = get_connection()
-    try:
+    with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -66,11 +64,6 @@ def create_shift(shift: ShiftCreate, token_data: dict = Depends(verify_token)):
             new_shift = cur.fetchone()
             conn.commit()
             return new_shift
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
-    finally:
-        conn.close()
 
 @app.get("/shifts")
 def list_shifts(
@@ -80,8 +73,7 @@ def list_shifts(
     token_data: dict = Depends(verify_token)
 ):
     worker_id = token_data["sub"]
-    conn = get_connection()
-    try:
+    with get_connection() as conn:
         with conn.cursor() as cur:
             query = "SELECT * FROM shifts WHERE worker_id = %s"
             params = [worker_id]
@@ -100,14 +92,11 @@ def list_shifts(
             cur.execute(query, params)
             shifts = cur.fetchall()
             return {"shifts": shifts, "count": len(shifts)}
-    finally:
-        conn.close()
 
 @app.get("/shifts/{shift_id}")
 def get_shift(shift_id: str, token_data: dict = Depends(verify_token)):
     worker_id = token_data["sub"]
-    conn = get_connection()
-    try:
+    with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT * FROM shifts WHERE shift_id = %s AND worker_id = %s",
@@ -117,14 +106,11 @@ def get_shift(shift_id: str, token_data: dict = Depends(verify_token)):
             if not shift:
                 raise HTTPException(status_code=404, detail="Shift not found or unauthorized")
             return shift
-    finally:
-        conn.close()
 
 @app.put("/shifts/{shift_id}")
 def update_shift(shift_id: str, shift: ShiftUpdate, token_data: dict = Depends(verify_token)):
     worker_id = token_data["sub"]
-    conn = get_connection()
-    try:
+    with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM shifts WHERE shift_id = %s AND worker_id = %s", (shift_id, worker_id))
             existing = cur.fetchone()
@@ -148,31 +134,22 @@ def update_shift(shift_id: str, shift: ShiftUpdate, token_data: dict = Depends(v
             updated = cur.fetchone()
             conn.commit()
             return updated
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
 
 @app.delete("/shifts/{shift_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_shift(shift_id: str, token_data: dict = Depends(verify_token)):
     worker_id = token_data["sub"]
-    conn = get_connection()
-    try:
+    with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM shifts WHERE shift_id = %s AND worker_id = %s RETURNING shift_id", (shift_id, worker_id))
             deleted = cur.fetchone()
             if not deleted:
                 raise HTTPException(status_code=404, detail="Shift not found or unauthorized")
             conn.commit()
-    finally:
-        conn.close()
 
 @app.get("/earnings/summary")
 def earnings_summary(token_data: dict = Depends(verify_token)):
     worker_id = token_data["sub"]
-    conn = get_connection()
-    try:
+    with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -197,6 +174,4 @@ def earnings_summary(token_data: dict = Depends(verify_token)):
                 **summary,
                 "effective_hourly_rate": round(effective_hourly_rate, 2)
             }
-    finally:
-        conn.close()
 

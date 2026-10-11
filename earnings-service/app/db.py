@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
@@ -14,6 +15,8 @@ pool = ConnectionPool(
 )
 
 
-def get_connection() -> Connection:
-    return pool.connection()
+@contextmanager
+def get_connection():
+    with pool.connection() as conn:
+        yield conn
 
