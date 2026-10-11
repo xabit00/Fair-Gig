@@ -1,5 +1,3 @@
-from collections.abc import Generator
-
 from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
@@ -16,7 +14,6 @@ pool = ConnectionPool(
 )
 
 
-def get_connection() -> Generator[Connection, None, None]:
-    with pool.connection() as connection:
-        yield connection
+def get_connection() -> Connection:
+    return pool.connection()
 
